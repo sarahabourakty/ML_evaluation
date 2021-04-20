@@ -1,0 +1,338 @@
+---
+title: "ML_eval"
+author: "Sarah Abourakty, Aarthee Baskaran, Shipra Trivedi"
+date: "4/20/2021"
+output:
+  html_document:
+    toc: TRUE
+    theme: cosmo
+    toc_float: TRUE
+    editor_options: 
+  chunk_output_type: console
+---
+
+# Heart
+
+### Dataset Explanation
+This dataset includes statistics on heart attacks and various physiological risk factors. We aimed to develop a model that would predict the probability of a heart attack based on the patient's age, cholesterol levels, and resting blood pressure. We chose these factors based on their relevance to heart attacks.    
+
+```{r setup, include=FALSE, echo=FALSE}
+library(class)
+library(tidyverse)
+library(caret)
+library(ROCR)
+library(MLmetrics)
+heart = read.csv("heart.csv", #<- name of the data set.
+                     check.names = FALSE, #<- don't change column names.
+                     stringsAsFactors = FALSE)
+str(heart)
+heart[, c("age","chol","trtbps")] <- lapply(heart[, c("age","chol","trtbps")],function(x) scale(x))
+str(heart)
+```
+
+
+```{r, include=FALSE, echo=FALSE}
+# Let's run the kNN algorithm on our banking data. 
+# Check the composition of labels in the data set. 
+table(heart$`output`)
+table(heart$`output`)[2] / sum(table(heart$`output`))
+# This means that at random, we have an 11.6% chance of correctly picking
+# out a subscribed individual. Let's see if kNN can do any better.
+# Let's split the data into a training and a test set.
+# Sample 80% of our know data as training and 20% as test.
+set.seed(1982)
+heart_data_train_rows = sample(1:nrow(heart),#<- from 1 to the number of 
+                                                     #rows in the data set
+                              round(0.8 * nrow(heart), 0),  #<- multiply the number of rows by 0.8 and round the decimals
+                              replace = FALSE)#<- don't replace the numbers
+head(heart_data_train_rows)
+# Let's check to make sure we have 80% of the rows. 
+length(heart_data_train_rows) / nrow(heart)
+heart_data_train = heart[heart_data_train_rows, ] #<- select the rows identified in the bank_data_train_rows data
+                                                    
+heart_data_test = heart[-heart_data_train_rows, ]  #<- select the rows that weren't identified in the bank_data_train_rows data
+# Check the number of rows in each set.
+nrow(heart_data_train)
+nrow(heart_data_test)
+# k-Nearest Neighbor is a randomized algorithm, so make sure to
+# use set.seed() to make your results repeatable.
+set.seed(1982)
+heart_3NN <-  knn(train = heart_data_train[, c("age","chol","trtbps")],#<- training set cases
+               test = heart_data_test[, c("age","chol","trtbps")],    #<- test set cases
+               cl = heart_data_train[, "output"],#<- category for true classification
+               k = 3,#<- number of neighbors considered
+               use.all = TRUE,
+               prob = TRUE) #<- control ties between class assignments If true, all distances equal to the kth largest are included
+# View the output.
+str(heart_3NN)
+length(heart_3NN)
+table(heart_3NN)
+attributes(heart_3NN)
+prb <- data.frame(prob=attr(heart_3NN, "prob"))
+```
+
+
+```{r, include=FALSE, echo=FALSE}
+# How does the kNN classification compare to the true class?
+# Let's take a look at the confusion matrix by combining the 
+# predictions from bank_3NN to the original data set.
+kNN_res = table(heart_3NN,
+              heart_data_test$`output`)
+```
+
+```{r, include = FALSE, echo=FALSE}
+# Select the true positives and true negatives by selecting
+# only the cells where the row and column names are the same.
+kNN_res[row(kNN_res) == col(kNN_res)]
+# Calculate the accuracy rate by dividing the correct classifications
+# by the total number of classifications.
+kNN_acc <-  sum(kNN_res[row(kNN_res) == col(kNN_res)]) / sum(kNN_res)
+kNN_sen <- kNN_res[2,2]/(kNN_res[2,2]+kNN_res[1,2])
+kNN_sen
+x <- (kNN_res[1,2])
+kNN_acc
+```
+**kNN values**
+
+kNN_res value: 11 20 <br />
+kNN_sen value: 0.526 <br />
+kNN_acc value: 0.508 <br />
+
+```{r, echo=FALSE}
+confusionMatrix(heart_3NN, factor(heart_data_test$`output`), positive = "1", dnn=c("Prediction", "Actual"), mode = "sens_spec")
+```
+
+```{r, include=FALSE, echo=FALSE}
+table(heart_3NN, heart_data_test$output)#essential the confusion matrix, though we can make a fancy one using caret built in functions
+
+heart_3NN<-as.data.frame(heart_3NN)
+heart_eval_prob <- knn(train = heart_data_train, test = heart_data_test, cl = heart_data_train$output, k = 3, prob = TRUE)
+prob<-attr(heart_eval_prob,"prob")
+other_prob<-1-prob
+heart_eval_prob<-data.frame(prob,other_prob,heart_data_test$output)
+#from the above we can see our True Positive Rate or sensitivity is quite bad @ 18%, False Positive Rate (1-Specificity) is also not terrible ~ @ 32.7%, we want this to be low.(Subject to change) 
+TPR<-(11/61)
+#TPR
+FPR<-(20/61)
+#FPR
+#Quick function to explore various threshold levels and output a confusion matrix
+adjust_thres <- function(x, y, z) {
+  #x=pred_probablities, y=threshold, z=test_outcome
+  thres <- as.factor(ifelse(x > y, 1,0))
+  confusionMatrix(thres, z, positive = "1", dnn=c("Prediction", "Actual"), mode = "everything")
+}
+```
+
+### Adjusting threshold
+After adjusting the threshold to **0.3**, the accuracy of the model increased from **0.508** to **0.623**. However, both the true and false positives decreased to 0. Additionally, the kappa value decreased from **0.0044** to **0**. This indicates that the model is not a good fit for the data since the kappa value isn't greater than **0.8**.  
+
+```{r, echo=FALSE, warning=FALSE}
+adjust_thres(heart_eval_prob$prob,.30, factor(heart_data_test$output)) 
+#Not much changes here because of the high probability splits of the data outcomes. Let's take a closer look. We can see that the algo isn't marginally mis-classifying these rows, it's very confidently wrong. Which likely means that there's too much emphasis being placed on too small a number of variables, principally the funfetti variable. 
+```
+
+```{r, include = FALSE, echo = FALSE}
+(error = mean(heart_3NN != heart_data_test$output)) #overall error rate, on average when does our prediction not match the actual, looks like around 15%, really just ok. 
+```
+The error of this model is **0.4918033**, indicating that the kNN model is a poor choice for this dataset.
+
+### ROCR
+```{r, include = FALSE, echo=FALSE}
+#install.packages("ROCR")
+#In order to use most evaluation packages it's just easier to have are predictions and targets in one place. 
+heart_eval <- data.frame(pred_class=heart_3NN, pred_prob=heart_eval_prob$prob,target=as.numeric(heart_data_test$output))
+str(heart_eval)
+pred <- prediction(heart_eval$pred_prob,heart_eval$target)
+kNN_perf <- performance(pred,"tpr","fpr")
+```
+
+```{r, echo = FALSE }
+plot(kNN_perf, colorize=TRUE)
+abline(a=0, b= 1)
+```
+
+```{r, include = FALSE}
+kNN_perf_AUC <- performance(pred,"auc")
+print(kNN_perf_AUC@y.values)
+```
+
+The area under the curve was **0.7379863**, which indicates the model is a fair fit for the model. However, this contradicts with the previously reported kappa and error values. 
+
+### LogLoss
+```{r, include = FALSE, echo=FALSE}
+#install.packages("MLmetrics")
+#View(loan_eval_prob)
+LogLoss(as.numeric(heart_eval$pred_prob),as.numeric(heart_data_test$output))
+#We want this number to be rather close to 0, so this is a pretty terrible result. 
+F1_Score(as.numeric(heart_eval$heart_3NN),as.numeric(heart_data_test$output))
+```
+
+A LogLoss value of **3.769976** was observed, which suggests the model is a poor fit for the dataset. 
+
+An F1_Score of **0.5373134** was observed. A good F1 score indicates low false positives and low false negatives; our matrix showed 0 false negatives but a higher false positive Therefore, an average F1 score was observed.  
+
+### Analysis
+Looking at the various evaluation methods of our model, we can conclude that a kNN model is not the best fit for predicting heart attacks using the age, cholesterol, and resting blood pressure factors. Mis-classification errors were identified in the dataset; the model over-estimated the probability that most individuals would have a heart attack. The model was overly sensitive to the factors.  
+
+
+# Indian Food
+
+### Dataset Explanation
+This dataset includes statistics and information on different indian dishes. We aimed to develop a model that would predict the diet (vegetarian or non-vegetarian) of an indian dish based on the prep time, cook time, and region (North, East, South, West, North East, and Central). We chose these factors based on their relevance to indian food diet.  
+
+```{r, include = FALSE, echo = FALSE}
+indian_food = read.csv("indian_food.csv")
+
+food_data = indian_food%>%
+  filter(prep_time != -1)%>%
+  filter(cook_time != -1)%>%
+  filter(region != -1)%>%
+  filter(region != "")%>%
+  select(diet, cook_time, prep_time, region)
+  
+food_data$region <- recode(food_data$region, 'North' = 1, 'East' = 2, 'South' = 3, 'West' = 4, 'North East' = 5, 'Central' = 6)
+
+food_data[food_data=="vegetarian"] <- 1
+food_data[food_data=="non vegetarian"] <- 0
+
+# Sample 80% of our know data as training and 20% as test.
+set.seed(1982)
+food_data_train_rows = sample(1:nrow(food_data),#<- from 1 to the number of 
+                                                     #rows in the data set
+                              round(0.8 * nrow(food_data), 0),  #<- multiply the number of rows by 0.8 and round the decimals
+                              replace = FALSE)#<- don't replace the numbers
+
+head(food_data_train_rows)
+
+# Let's check to make sure we have 80% of the rows. 
+length(food_data_train_rows) / nrow(food_data)
+
+food_data_train = food_data[food_data_train_rows, ] #<- select the rows identified in the bank_data_train_rows data
+                                                    
+food_data_test = food_data[-food_data_train_rows, ]  #<- select the rows that weren't identified in the bank_data_train_rows data
+
+# Check the number of rows in each set.
+nrow(food_data_train)
+nrow(food_data_test)
+
+# k-Nearest Neighbor is a randomized algorithm, so make sure to
+# use set.seed() to make your results repeatable.
+set.seed(1982)
+food_3NN <-  knn(train = food_data_train[, c("prep_time", "cook_time", "region")],#<- training set cases
+               test = food_data_test[, c("prep_time", "cook_time", "region")],    #<- test set cases
+               cl = food_data_train[, "diet"],#<- category for true classification
+               k = 3,#<- number of neighbors considered
+               use.all = TRUE,
+               prob = TRUE) #<- control ties between class assignments If true, all distances equal to the kth largest are included
+
+kNN_res = table(food_3NN,
+                food_data_test$`diet`)
+kNN_res
+sum(kNN_res)  #<- the total is all the test examples
+```
+
+
+```{r, include = FALSE, echo = FALSE}
+# Select the true positives and true negatives by selecting
+# only the cells where the row and column names are the same.
+kNN_res[row(kNN_res) == col(kNN_res)]
+
+# Calculate the accuracy rate by dividing the correct classifications
+# by the total number of classifications.
+kNN_sen <- kNN_res[2,2]/(kNN_res[2,2]+kNN_res[1,2])
+kNN_sen
+x <- (kNN_res[1,2])
+
+kNN_acc = sum(kNN_res[row(kNN_res) == col(kNN_res)]) / sum(kNN_res)
+kNN_acc
+```
+**kNN values**
+
+kNN_res value: 0 39 <br />
+kNN_sen value: 1 <br />
+kNN_acc value: 0.929 <br />
+
+```{r, echo=FALSE}
+confusionMatrix(food_3NN, factor(food_data_test$`diet`), positive = "1", dnn=c("Prediction", "Actual"), mode = "sens_spec")
+```
+
+```{r, include = FALSE, echo = FALSE}
+food_eval_prob <- knn(train = food_data_train, test = food_data_test, cl = food_data_train$diet, k = 3, prob = TRUE, use.all = TRUE)
+
+food_list = attributes(food_eval_prob)
+food_prob = food_list$prob
+food_other_prob = 1-food_prob
+food_eval_prob = data.frame(food_other_prob, food_prob, food_data_test$diet)
+
+adjust_thres <- function(x, y, z) {
+  #x=pred_probablities, y=threshold, z=test_outcome
+  thres <- as.factor(ifelse(x > y, 1,0))
+  confusionMatrix(thres, z, positive = "1", dnn=c("Prediction", "Actual"), mode = "everything")
+}
+```
+### Adjusting Threshold
+
+Adjusting the threshold to 0.3 **did not change** the confusion matrix. This is because of the high probability splits and indicates that the model is relying on too few variables and should account for more. This model cannot accurately predict the diet of indian foods even after threshold adjustments. 
+
+Additionally, our kappa value was **0** which strongly indicates this model is not the best fit for the dataset. This aligns with the conclusion from the threshold adjustments.  
+
+```{r, include = FALSE, echo = FALSE, warnings = FALSE}
+adjust_thres(food_eval_prob$food_prob, .30, factor(food_data_test$diet)) 
+```
+
+```{r, include = FALSE, echo = FALSE}
+food_eval_prob$food_data_test.diet <- food_data_test$diet
+```
+
+```{r, include = FALSE, echo = FALSE}
+(error = mean(food_3NN != food_data_test$diet))#overall error rate, on average when does our prediction not match the actual, looks like around 15%, really just ok.
+```
+
+The error for this model was **7%**. 
+
+### ROCR
+```{r, include = FALSE, echo = FALSE}
+#install.packages("ROCR")
+#In order to use most evaluation packages it's just easier to have are predictions and targets in one place. 
+
+food_eval <- data.frame(pred_class=food_3NN, pred_prob=food_eval_prob$food_prob,target=as.numeric(food_data_test$diet))
+
+str(food_eval)
+
+pred <- prediction(food_eval$pred_prob,food_eval$target)
+
+kNN_f_perf <- performance(pred,"tpr","fpr")
+```
+
+```{r, echo = FALSE, warnings = FALSE}
+plot(kNN_f_perf, colorize=TRUE)
+abline(a=0, b= 1)
+
+kNN_f_perf_AUC <- performance(pred,"auc")
+#print(knn_f_perf_AUC@y.values) #0.69375
+```
+
+The area under the curve was **0.69735**, which indicates the model is a fair fit for the model. However, this contradicts with the previously reported kappa value. 
+
+```{r, echo = FALSE, include = FALSE}
+food_3NN = as.data.frame(food_3NN)
+#install.packages("MLmetrics")
+```
+
+### LogLoss
+```{r, include = FALSE, echo = FALSE}
+LogLoss(as.numeric(food_eval$pred_prob), as.numeric(food_data_test$diet))
+#We want this number to be rather close to 0, so this is a pretty terrible result. 
+
+#F1_Score(as.numeric(food_eval$pred_class),as.numeric(food_data_test$diet)) #0.0476
+```
+
+A LogLoss value of **0.9326** was observed, which suggests the model is a poor fit for the dataset. 
+
+An F1_Score of **0.963** was observed. A good F1 score indicates low false positives and low false negatives; our false positives and false negatives are both very low and the model also a high precision and recall. Therefore, this metric indicates our model is a fair fit.  
+
+### Analysis
+Looking at the various evaluation methods of our model, we can conclude that a kNN model is not the best fit for predicting indian dish diet using the cook time, prep time, and region of the dish. Mis-classification errors were identified in the dataset; the model over-estimated the probability that most dishes would be vegetarian. The model was overly sensitive to the factors. This can be attributed to the nature of this dataset as more quantitative factors could've developed a more accurate model.  
+
+# Overall conclusion
+Overall, the kNN model was not the best choice to evaluate either dataset and make suitable predictions in response to the questions we posed. One recommendation we would consider is adjust the number of neighbors used in the kNN model or use an elbow plot to determine the optimal number of neighbors. Additionally, the threshold can be increased to observe the effects on the confusion matrix and error. Both models are overly sensitive to the factors and may over-estimate the probability of positive cases. 
